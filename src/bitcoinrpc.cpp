@@ -1,3 +1,8 @@
+// Copyright (c) 2014 PeerDB developers
+// CORS feature is distributed under PeerDB software license, can be freely
+// used and distributed with Peercoin ecosystem softwares, including
+// Peercoin, Primecoin, Peershare, Nubits
+//
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Copyright (c) 2011-2013 The PPCoin developers
@@ -607,7 +612,7 @@ string rfc1123Time()
     return string(buffer);
 }
 
-static string HTTPReply(int nStatus, const string& strMsg, bool keepalive)
+static string HTTPReply(int nStatus, const string& strMsg, bool keepalive, const string& strAllowHeaders = string("Authorization"))
 {
     if (nStatus == HTTP_UNAUTHORIZED)
         return strprintf("HTTP/1.0 401 Authorization Required\r\n"
@@ -640,6 +645,9 @@ static string HTTPReply(int nStatus, const string& strMsg, bool keepalive)
             "Content-Length: %"PRIszu"\r\n"
             "Content-Type: application/json\r\n"
             "Server: ppcoin-json-rpc/%s\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n"
+            "Access-Control-Allow-Headers: %s\r\n"
             "\r\n"
             "%s",
         nStatus,
@@ -648,6 +656,7 @@ static string HTTPReply(int nStatus, const string& strMsg, bool keepalive)
         keepalive ? "keep-alive" : "close",
         strMsg.size(),
         FormatFullVersion().c_str(),
+        strAllowHeaders.c_str(),
         strMsg.c_str());
 }
 
@@ -664,8 +673,9 @@ bool ReadHTTPRequestLine(std::basic_istream<char>& stream, int &proto,
         return false;
 
     // HTTP methods permitted: GET, POST
+    // CORS: allow OPTIONS method for Cross-Origin Resource Sharing
     http_method = vWords[0];
-    if (http_method != "GET" && http_method != "POST")
+    if (http_method != "GET" && http_method != "POST" && http_method != "OPTIONS")
         return false;
 
     // HTTP URI must be an absolute path, relative to current host
@@ -1241,6 +1251,13 @@ void ServiceConnection(AcceptedConnection *conn)
             break;
         }
 
+        // CORS: Reply OPTIONS request for Cross-Origin Resource Sharing
+        if (strMethod == "OPTIONS")
+        {
+            conn->stream() << HTTPReply(HTTP_OK, "", fRun, mapHeaders.count("access-control-request-headers")? mapHeaders["access-control-request-headers"] : "Authorization") << std::flush;
+            break;
+        }
+
         // Check authorization
         if (mapHeaders.count("authorization") == 0)
         {
@@ -1287,7 +1304,7 @@ void ServiceConnection(AcceptedConnection *conn)
             else
                 throw JSONRPCError(RPC_PARSE_ERROR, "Top-level object parse error");
 
-            conn->stream() << HTTPReply(HTTP_OK, strReply, fRun) << std::flush;
+            conn->stream() << HTTPReply(HTTP_OK, strReply, fRun, mapHeaders.count("access-control-request-headers")? mapHeaders["access-control-request-headers"] : "Authorization") << std::flush;
         }
         catch (Object& objError)
         {
